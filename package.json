@@ -1,0 +1,17 @@
+{
+  "name": "site-memory-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Persistent website memory for AI coding agents (MCP via Apify)",
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test test/*.test.js",
+    "test:local": "node scripts/local-smoke.mjs"
+  },
+  "dependencies": {
+    "apify": "^3.5.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

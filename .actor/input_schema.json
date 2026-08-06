@@ -1,0 +1,108 @@
+{
+  "title": "Site Memory Agent",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "action": {
+      "title": "Action",
+      "type": "string",
+      "description": "REQUIRED. Operation: remember | recall | search | forget | context_pack",
+      "enum": ["remember", "recall", "search", "forget", "context_pack"],
+      "default": "context_pack",
+      "prefill": "context_pack"
+    },
+    "memoryStoreId": {
+      "title": "Memory store ID",
+      "type": "string",
+      "description": "REQUIRED. Stable id for your named key-value store (e.g. my-github-user~stripe-integration). Same id across sessions = persistent memory.",
+      "editor": "textfield",
+      "prefill": "demo-user~apify-mcp-project"
+    },
+    "url": {
+      "title": "URL",
+      "type": "string",
+      "description": "Page URL for remember, recall, or context_pack. Normalized for matching.",
+      "editor": "textfield",
+      "prefill": "https://docs.apify.com/integrations/mcp"
+    },
+    "content": {
+      "title": "Memory content",
+      "type": "string",
+      "description": "Text to save when action is remember.",
+      "editor": "textarea"
+    },
+    "query": {
+      "title": "Search query",
+      "type": "string",
+      "description": "Keywords for search or to rank context_pack results.",
+      "editor": "textfield"
+    },
+    "memoryId": {
+      "title": "Memory ID",
+      "type": "string",
+      "description": "UUID of a single memory (forget, or remember update if provided).",
+      "editor": "textfield"
+    },
+    "projectId": {
+      "title": "Project ID",
+      "type": "string",
+      "description": "Optional filter (repo name, feature slug).",
+      "editor": "textfield"
+    },
+    "maxResults": {
+      "title": "Max results",
+      "type": "integer",
+      "description": "Limit for recall and search.",
+      "default": 20,
+      "minimum": 1,
+      "maximum": 100
+    },
+    "maxTokens": {
+      "title": "Max tokens (estimate)",
+      "type": "integer",
+      "description": "Approximate token budget for context_pack markdown.",
+      "default": 2500,
+      "minimum": 200,
+      "maximum": 8000
+    },
+    "memoryDetails": {
+      "title": "Memory details",
+      "type": "object",
+      "description": "Optional fields when remembering.",
+      "editor": "json",
+      "properties": {
+        "title": { "type": "string" },
+        "memoryType": {
+          "type": "string",
+          "enum": [
+            "integration_note",
+            "api_quirk",
+            "auth_flow",
+            "selector",
+            "breaking_change",
+            "project_binding",
+            "general"
+          ]
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "source": {
+          "type": "string",
+          "enum": ["agent", "human", "crawl"]
+        },
+        "relatedUrls": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  },
+  "required": ["action", "memoryStoreId"]
+}
