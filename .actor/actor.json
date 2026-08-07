@@ -10,17 +10,5 @@
   "input": "./INPUT_SCHEMA.json",
   "dockerfile": "./Dockerfile",
   "standbyMode": true,
-  "webServerMcpPort": 3000,
-  "storages": {
-    "keyValueStore": {
-      "actorKeyValueStoreSchemaVersion": 1,
-      "schema": {
-        "title": "Memory Store",
-        "description": "Key-value store for agent memories",
-        "type": "object",
-        "properties": {},
-        "required": []
-      }
-    }
-  }
+  "webServerMcpPort": 3000
 }
