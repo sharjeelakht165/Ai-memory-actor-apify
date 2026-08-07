@@ -13,6 +13,7 @@
   "webServerMcpPort": 3000,
   "storages": {
     "keyValueStore": {
+      "actorKeyValueStoreSchemaVersion": 1,
       "schema": {
         "title": "Memory Store",
         "description": "Key-value store for agent memories",
