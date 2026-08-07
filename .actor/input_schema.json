@@ -71,8 +71,9 @@
       "description": "Optional fields when remembering.",
       "editor": "json",
       "properties": {
-        "title": { "type": "string" },
+        "title": { "title": "Memory title", "type": "string", "description": "Short descriptive title for this memory." },
         "memoryType": {
+          "title": "Memory type",
           "type": "string",
           "enum": [
             "integration_note",
@@ -85,19 +86,25 @@
           ]
         },
         "tags": {
+          "title": "Tags",
           "type": "array",
-          "items": { "type": "string" }
+          "items": { "type": "string" },
+          "description": "Optional tags to help categorize this memory."
         },
         "confidence": {
+          "title": "Confidence",
           "type": "number",
           "minimum": 0,
-          "maximum": 1
+          "maximum": 1,
+          "description": "Estimated confidence (0.0 - 1.0) in the memory's accuracy."
         },
         "source": {
+          "title": "Source",
           "type": "string",
           "enum": ["agent", "human", "crawl"]
         },
         "relatedUrls": {
+          "title": "Related URLs",
           "type": "array",
           "items": { "type": "string" }
         }
