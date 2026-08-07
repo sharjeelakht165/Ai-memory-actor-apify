@@ -6,13 +6,14 @@
     "action": {
       "title": "Action",
       "type": "string",
-      "description": "REQUIRED. Operation to perform: remember | recall | search | forget | context_pack",
-      "enum": ["remember", "recall", "search", "forget", "context_pack"],
-      "default": "context_pack",
-      "prefill": "context_pack"
+      "description": "REQUIRED. Operation to perform: remember | recall | search | forget | context_pack | update | stats | prune",
+      "enum": ["remember", "recall", "search", "forget", "context_pack", "update", "stats", "prune"],
+      "enumTitles": ["Remember", "Recall", "Search", "Forget", "Context Pack", "Update", "Stats", "Prune"],
+      "default": "remember",
+      "prefill": "remember"
     },
     "memoryStoreId": {
-      "title": "Memory store ID",
+      "title": "Memory Store ID",
       "type": "string",
       "description": "REQUIRED. Stable id for your named key-value store (e.g. my-github-user~stripe-integration). Same id across sessions = persistent memory.",
       "editor": "textfield",
@@ -29,23 +30,23 @@
       "maxLength": 2000
     },
     "content": {
-      "title": "Memory content",
+      "title": "Memory Content",
       "type": "string",
       "description": "Text to save when action is remember.",
       "editor": "textarea",
       "maxLength": 200000
     },
     "query": {
-      "title": "Search query",
+      "title": "Search Query",
       "type": "string",
-      "description": "Keywords for search or to rank context_pack results.",
+      "description": "Keywords for search or to rank recall results.",
       "editor": "textfield",
       "maxLength": 1000
     },
     "memoryId": {
       "title": "Memory ID",
       "type": "string",
-      "description": "UUID of a single memory (forget, or remember update if provided).",
+      "description": "UUID of a single memory (for forget or update operations).",
       "editor": "textfield",
       "format": "uuid"
     },
@@ -57,7 +58,7 @@
       "maxLength": 200
     },
     "maxResults": {
-      "title": "Max results",
+      "title": "Max Results",
       "type": "integer",
       "description": "Limit for recall and search.",
       "default": 20,
@@ -65,30 +66,36 @@
       "maximum": 500
     },
     "maxTokens": {
-      "title": "Max tokens (estimate)",
+      "title": "Max Tokens (Estimate)",
       "type": "integer",
-      "description": "Approximate token budget for context_pack markdown.",
+      "description": "Approximate token budget for context markdown.",
       "default": 2500,
       "minimum": 200,
       "maximum": 8000
     },
     "idempotencyKey": {
-      "title": "Idempotency key",
+      "title": "Idempotency Key",
       "type": "string",
       "description": "Optional client-provided idempotency key to deduplicate repeated remember/create requests.",
       "editor": "textfield",
       "maxLength": 100
     },
     "memoryDetails": {
-      "title": "Memory details",
+      "title": "Memory Details",
       "type": "object",
       "description": "Optional structured metadata when remembering.",
       "editor": "json",
       "properties": {
-        "title": { "title": "Memory title", "type": "string", "description": "Short descriptive title for this memory.", "maxLength": 300 },
-        "memoryType": {
-          "title": "Memory type",
+        "title": {
+          "title": "Memory Title",
           "type": "string",
+          "description": "Short descriptive title for this memory.",
+          "maxLength": 300
+        },
+        "memoryType": {
+          "title": "Memory Type",
+          "type": "string",
+          "description": "Type classification for this memory.",
           "enum": [
             "integration_note",
             "api_quirk",
@@ -97,6 +104,15 @@
             "breaking_change",
             "project_binding",
             "general"
+          ],
+          "enumTitles": [
+            "Integration Note",
+            "API Quirk",
+            "Auth Flow",
+            "Selector",
+            "Breaking Change",
+            "Project Binding",
+            "General"
           ]
         },
         "tags": {
@@ -113,15 +129,110 @@
           "maximum": 1,
           "description": "Estimated confidence (0.0 - 1.0) in the memory's accuracy."
         },
+        "importance": {
+          "title": "Importance",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Importance score (0.0 - 1.0) for ranking and decay."
+        },
+        "category": {
+          "title": "Category",
+          "type": "string",
+          "description": "Category for organizing memories.",
+          "maxLength": 100
+        },
         "source": {
           "title": "Source",
           "type": "string",
-          "enum": ["agent", "human", "crawl"]
+          "description": "Origin of the memory.",
+          "enum": ["agent", "human", "crawl"],
+          "enumTitles": ["Agent", "Human", "Crawl"]
         },
         "relatedUrls": {
           "title": "Related URLs",
           "type": "array",
-          "items": { "type": "string", "format": "uri" }
+          "items": { "type": "string", "format": "uri" },
+          "description": "URLs related to this memory."
+        }
+      }
+    },
+    "searchOptions": {
+      "title": "Search Options",
+      "type": "object",
+      "description": "Options for refining search results.",
+      "editor": "json",
+      "properties": {
+        "limit": {
+          "title": "Limit",
+          "type": "integer",
+          "description": "Maximum number of results to return.",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 500
+        },
+        "category": {
+          "title": "Category Filter",
+          "type": "string",
+          "description": "Filter results by category.",
+          "maxLength": 100
+        },
+        "includeArchived": {
+          "title": "Include Archived",
+          "type": "boolean",
+          "description": "Whether to include archived memories in results.",
+          "default": false
+        },
+        "minScore": {
+          "title": "Minimum Score",
+          "type": "number",
+          "description": "Minimum relevance score threshold for results.",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "decayConfig": {
+      "title": "Decay Configuration",
+      "type": "object",
+      "description": "Configuration for memory importance decay over time.",
+      "editor": "json",
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean",
+          "description": "Whether memory decay is enabled.",
+          "default": false
+        },
+        "halfLifeDays": {
+          "title": "Half-Life Days",
+          "type": "number",
+          "description": "Number of days for importance to halve.",
+          "default": 30,
+          "minimum": 1
+        },
+        "minImportance": {
+          "title": "Minimum Importance",
+          "type": "number",
+          "description": "Minimum importance before archiving.",
+          "default": 0.1,
+          "minimum": 0,
+          "maximum": 1
+        },
+        "pruneThreshold": {
+          "title": "Prune Threshold",
+          "type": "number",
+          "description": "Importance threshold below which memories are pruned.",
+          "default": 0.05,
+          "minimum": 0,
+          "maximum": 1
+        },
+        "maxMemoriesPerUser": {
+          "title": "Max Memories Per User",
+          "type": "integer",
+          "description": "Maximum number of active memories per user.",
+          "default": 1000,
+          "minimum": 1
         }
       }
     }
@@ -136,10 +247,13 @@
       "memoryDetails": { "title": "Rate-limit header quirk", "memoryType": "api_quirk", "tags": ["rate-limit", "header"] }
     },
     {
-      "action": "context_pack",
+      "action": "search",
       "memoryStoreId": "demo-user~apify-mcp",
-      "query": "authentication",
-      "maxTokens": 2000
+      "query": "authentication"
+    },
+    {
+      "action": "stats",
+      "memoryStoreId": "demo-user~apify-mcp"
     }
   ],
   "allOf": [
@@ -152,8 +266,8 @@
       "then": { "required": ["memoryId"] }
     },
     {
-      "if": { "properties": { "action": { "const": "recall" } } },
-      "then": { "required": ["url"] }
+      "if": { "properties": { "action": { "const": "update" } } },
+      "then": { "required": ["memoryId"] }
     },
     {
       "if": { "properties": { "action": { "const": "search" } } },

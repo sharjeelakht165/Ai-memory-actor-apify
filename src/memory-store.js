@@ -24,6 +24,9 @@ const MEMORY_PREFIX = 'memory-';
  * @property {string} createdAt
  * @property {string} updatedAt
  * @property {string} contentHash
+ * @property {boolean} [archived]
+ * @property {number} [decayedConfidence]
+ * @property {number} [accessCount]
  */
 
 /**
@@ -108,7 +111,7 @@ export async function deleteMemory(store, memoryId) {
 
 /**
  * @param {object} input
- * @param {MemoryRecord[]} existing
+ * @param {MemoryRecord|null} [existing]
  */
 export function buildMemoryRecord(input, existing = null) {
     const details = input.memoryDetails && typeof input.memoryDetails === 'object'

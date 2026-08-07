@@ -3,11 +3,13 @@ import { Actor, log } from 'apify';
 import {
     actionContextPack,
     actionForget,
+    actionPrune,
     actionRecall,
     actionRemember,
     actionSearch,
+    actionUpdate,
 } from './actions.js';
-import { sanitizeStoreName } from './memory-store.js';
+import { loadAllMemories, sanitizeStoreName } from './memory-store.js';
 
 await Actor.init();
 
@@ -29,6 +31,7 @@ let result;
 
 switch (action) {
     case 'remember':
+    case 'store': // alias for remember
         result = await actionRemember(store, input);
         break;
     case 'recall':
@@ -38,10 +41,35 @@ switch (action) {
         result = await actionSearch(store, input);
         break;
     case 'forget':
+    case 'delete': // alias for forget
         result = await actionForget(store, input);
         break;
     case 'context_pack':
         result = await actionContextPack(store, input);
+        break;
+    case 'update':
+        if (!input.memoryId) throw new Error('update requires memoryId');
+        result = await actionUpdate(store, input);
+        break;
+    case 'stats': {
+        const { memories } = await loadAllMemories(store);
+        const byType = {};
+        for (const m of memories) {
+            byType[m.memoryType] = (byType[m.memoryType] || 0) + 1;
+        }
+        result = {
+            action: 'stats',
+            ok: true,
+            totalMemories: memories.length,
+            byType,
+            lastUpdated: memories.length
+                ? memories.reduce((latest, m) => m.updatedAt > latest ? m.updatedAt : latest, '')
+                : null,
+        };
+        break;
+    }
+    case 'prune':
+        result = await actionPrune(store, input);
         break;
     default:
         throw new Error(`Unknown action: ${action}`);
