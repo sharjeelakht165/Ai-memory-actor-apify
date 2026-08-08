@@ -237,41 +237,5 @@
       }
     }
   },
-  "required": ["action", "memoryStoreId"],
-  "examples": [
-    {
-      "action": "remember",
-      "memoryStoreId": "demo-user~apify-mcp",
-      "url": "https://docs.example.com/integration",
-      "content": "Note: This API uses a nonstandard rate-limit header 'X-Rate-Limit-Limit'.",
-      "memoryDetails": { "title": "Rate-limit header quirk", "memoryType": "api_quirk", "tags": ["rate-limit", "header"] }
-    },
-    {
-      "action": "search",
-      "memoryStoreId": "demo-user~apify-mcp",
-      "query": "authentication"
-    },
-    {
-      "action": "stats",
-      "memoryStoreId": "demo-user~apify-mcp"
-    }
-  ],
-  "allOf": [
-    {
-      "if": { "properties": { "action": { "const": "remember" } } },
-      "then": { "required": ["content"] }
-    },
-    {
-      "if": { "properties": { "action": { "const": "forget" } } },
-      "then": { "required": ["memoryId"] }
-    },
-    {
-      "if": { "properties": { "action": { "const": "update" } } },
-      "then": { "required": ["memoryId"] }
-    },
-    {
-      "if": { "properties": { "action": { "const": "search" } } },
-      "then": { "required": ["query"] }
-    }
-  ]
+  "required": ["action", "memoryStoreId"]
 }
