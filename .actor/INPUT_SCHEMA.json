@@ -17,7 +17,6 @@
       "type": "string",
       "description": "REQUIRED. Stable id for your named key-value store (e.g. my-github-user~stripe-integration). Same id across sessions = persistent memory.",
       "editor": "textfield",
-      "pattern": "^[a-z0-9_\\-~.]{3,100}$",
       "prefill": "demo-user~apify-mcp-project"
     },
     "url": {
@@ -25,7 +24,6 @@
       "type": "string",
       "description": "Page URL for remember, recall, or context_pack. Normalized for matching.",
       "editor": "textfield",
-      "format": "uri",
       "prefill": "https://docs.apify.com/integrations/mcp",
       "maxLength": 2000
     },
@@ -47,8 +45,7 @@
       "title": "Memory ID",
       "type": "string",
       "description": "UUID of a single memory (for forget or update operations).",
-      "editor": "textfield",
-      "format": "uuid"
+      "editor": "textfield"
     },
     "projectId": {
       "title": "Project ID",
@@ -152,7 +149,7 @@
         "relatedUrls": {
           "title": "Related URLs",
           "type": "array",
-          "items": { "type": "string", "format": "uri" },
+          "items": { "type": "string" },
           "description": "URLs related to this memory."
         }
       }
