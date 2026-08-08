@@ -5,6 +5,8 @@
         "moduleResolution": "NodeNext",
         "esModuleInterop": true,
         "strict": true,
+        "noEmit": true,
+        "allowImportingTsExtensions": true,
         "outDir": "dist",
         "rootDir": "src",
         "declaration": true,

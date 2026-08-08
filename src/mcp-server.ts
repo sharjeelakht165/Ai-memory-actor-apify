@@ -8,6 +8,8 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
 import { Actor, log } from 'apify';
 import {
@@ -330,28 +332,10 @@ function jsonError(message: string) {
 // ---------------------------------------------------------------------------
 
 /**
- * Start the MCP server with the given transport.
- *
- * @param transport  `'stdio'` (default) or `'sse'`.
+ * Create an MCP server instance with all memory tools registered.
+ * Shared by the stdio transport and the /mcp HTTP endpoint.
  */
-export async function startMcpServer(
-  transport: 'stdio' | 'sse' = 'stdio',
-): Promise<void> {
-  // --- Initialise Apify Actor ---
-  await Actor.init();
-
-  const input = (await Actor.getInput()) as {
-    memoryStoreId?: string;
-  } | null;
-
-  const memoryStoreId = input?.memoryStoreId ?? 'default-site-memory';
-  const storeName = sanitizeStoreName(memoryStoreId);
-  log.info('MCP server opening key-value store', { storeName });
-
-  const kvStore = await Actor.openKeyValueStore(storeName);
-  const manager = new MemoryManager(kvStore);
-
-  // --- Create MCP server ---
+export function createMemoryMcpServer(manager: MemoryManager): McpServer {
   const server = new McpServer({
     name: 'site-memory-agent',
     version: '0.1.0',
@@ -516,6 +500,32 @@ export async function startMcpServer(
     },
   );
 
+  return server;
+}
+
+/**
+ * Start the MCP server with the given transport.
+ *
+ * @param transport  `'stdio'` (default) or `'sse'`.
+ */
+export async function startMcpServer(
+  transport: 'stdio' | 'sse' = 'stdio',
+): Promise<void> {
+  // --- Initialise Apify Actor ---
+  await Actor.init();
+
+  const input = (await Actor.getInput()) as {
+    memoryStoreId?: string;
+  } | null;
+
+  const memoryStoreId = input?.memoryStoreId ?? 'default-site-memory';
+  const storeName = sanitizeStoreName(memoryStoreId);
+  log.info('MCP server opening key-value store', { storeName });
+
+  const kvStore = await Actor.openKeyValueStore(storeName);
+  const manager = new MemoryManager(kvStore);
+  const server = createMemoryMcpServer(manager);
+
   // --- Connect transport ---
   if (transport === 'sse') {
     // SSE transport requires an HTTP server — defer to integration layer.
@@ -526,6 +536,25 @@ export async function startMcpServer(
   const stdioTransport = new StdioServerTransport();
   await server.connect(stdioTransport);
   log.info('MCP server connected via stdio');
+}
+
+/**
+ * Handle a single MCP Streamable HTTP request (used by the /mcp endpoint
+ * in HTTP server mode). Stateless: a fresh server instance per request.
+ */
+export async function handleMcpHttpRequest(
+  manager: MemoryManager,
+  req: IncomingMessage,
+  res: ServerResponse,
+  parsedBody?: unknown,
+): Promise<void> {
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true,
+  });
+  const server = createMemoryMcpServer(manager);
+  await server.connect(transport);
+  await transport.handleRequest(req, res, parsedBody);
 }
 
 // Allow running directly: node --import tsx src/mcp-server.ts

@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import { Actor, log } from 'apify';
 import { MemoryManager } from './memory-manager.ts';
+import { MemoryManager as McpMemoryManager, handleMcpHttpRequest } from './mcp-server.ts';
+import { sanitizeStoreName } from './memory-store.js';
 import type { MemoryDetails, DecayConfig, SearchOptions, SearchResult } from './types.js';
 
 export async function startServer(port?: number): Promise<void> {
@@ -11,9 +13,26 @@ export async function startServer(port?: number): Promise<void> {
     const serverPort = port || Number(process.env.ACTOR_WEB_SERVER_PORT) || 3000;
     const memoryManager = new MemoryManager();
 
+    // MCP over HTTP (webServerMcpPath in actor.json) — stateless Streamable
+    // HTTP endpoint backed by the default memory store.
+    const mcpStore = await Actor.openKeyValueStore(sanitizeStoreName('default-site-memory'));
+    const mcpManager = new McpMemoryManager(mcpStore);
+
     // Middleware
     app.use(cors());
     app.use(express.json());
+
+    // MCP Streamable HTTP endpoint (Apify MCP / agent clients like Antigravity)
+    app.all('/mcp', async (req, res) => {
+        try {
+            await handleMcpHttpRequest(mcpManager, req, res, req.body);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'MCP request failed';
+            if (!res.headersSent) {
+                res.status(500).json({ error: message });
+            }
+        }
+    });
 
     // Health check
     app.get('/api/health', (_req, res) => {
@@ -151,6 +170,7 @@ export async function startServer(port?: number): Promise<void> {
             version: '1.0',
             endpoints: [
                 { method: 'GET', path: '/api/health', description: 'Health check' },
+                { method: 'ALL', path: '/mcp', description: 'MCP Streamable HTTP endpoint (memory tools)' },
                 { method: 'POST', path: '/api/memories', description: 'Store a new memory', body: '{ userId, content, category?, tags?, importance?, metadata? }' },
                 { method: 'GET', path: '/api/memories/:userId', description: 'Recall memories', query: 'category?, limit?' },
                 { method: 'POST', path: '/api/memories/search', description: 'Search memories', body: '{ userId, query, category?, limit?, minScore? }' },
