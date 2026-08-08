@@ -9,6 +9,6 @@
   "input": "./INPUT_SCHEMA.json",
   "output": "./output_schema.json",
   "dockerfile": "./Dockerfile",
-  "usesStandbyMode": true,
+  "usesStandbyMode": false,
   "webServerMcpPath": "/mcp"
 }
