@@ -114,14 +114,26 @@ export async function deleteMemory(store, memoryId) {
  * @param {MemoryRecord|null} [existing]
  */
 export function buildMemoryRecord(input, existing = null) {
-    const details = input.memoryDetails && typeof input.memoryDetails === 'object'
+    const nested = input.memoryDetails && typeof input.memoryDetails === 'object'
         ? input.memoryDetails
         : {};
+
+    // Merge top-level input schema fields (Apify Console form) with nested
+    // memoryDetails. Nested fields take priority when both are present.
+    const details = {
+        title: nested.title || input.memoryTitle || undefined,
+        memoryType: nested.memoryType || input.memoryType || undefined,
+        tags: Array.isArray(nested.tags) && nested.tags.length ? nested.tags : (Array.isArray(input.tags) && input.tags.length ? input.tags : undefined),
+        confidence: typeof nested.confidence === 'number' ? nested.confidence : (typeof input.confidence === 'number' ? input.confidence : undefined),
+        source: nested.source || input.memorySource || undefined,
+        relatedUrls: Array.isArray(nested.relatedUrls) && nested.relatedUrls.length ? nested.relatedUrls : (Array.isArray(input.relatedUrls) && input.relatedUrls.length ? input.relatedUrls : undefined),
+    };
+
     const url = normalizeUrl(input.url);
     const content = String(input.content || '').trim();
     const now = new Date().toISOString();
     const id = input.memoryId || existing?.id || randomUUID();
-    const tags = Array.isArray(details.tags) ? details.tags.map(String) : [];
+    const tags = details.tags ? details.tags.map(String) : [];
     /** @type {MemoryType} */
     const memoryType = details.memoryType || existing?.memoryType || 'general';
     /** @type {MemorySource} */
@@ -138,7 +150,7 @@ export function buildMemoryRecord(input, existing = null) {
         confidence: typeof details.confidence === 'number' ? details.confidence : (existing?.confidence ?? 0.8),
         source,
         projectId: input.projectId || existing?.projectId || null,
-        relatedUrls: Array.isArray(details.relatedUrls) ? details.relatedUrls.map(String) : (existing?.relatedUrls || []),
+        relatedUrls: details.relatedUrls ? details.relatedUrls.map(String) : (existing?.relatedUrls || []),
         createdAt: existing?.createdAt || now,
         updatedAt: now,
         contentHash: contentHash(content),
