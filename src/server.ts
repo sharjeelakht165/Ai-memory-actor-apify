@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { Actor, log } from 'apify';
-import { MemoryManager } from './memory-manager.js';
+import { MemoryManager } from './memory-manager.ts';
 import type { MemoryDetails, DecayConfig, SearchOptions, SearchResult } from './types.js';
 
 export async function startServer(port?: number): Promise<void> {
