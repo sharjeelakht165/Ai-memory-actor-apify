@@ -2,13 +2,12 @@
   "actorSpecification": 1,
   "name": "Ai-memory-actor-apify",
   "title": "AI Memory Actor - Long-Term Memory for AI Agents",
-  "description": "A long-term memory actor with MCP server, HTTP API, smart search, and automatic memory management",
   "version": "1.0",
   "meta": {
     "templateId": "ts-start"
   },
   "input": "./INPUT_SCHEMA.json",
   "dockerfile": "./Dockerfile",
-  "standbyMode": true,
-  "webServerMcpPort": 3000
+  "usesStandbyMode": true,
+  "webServerMcpPath": "/mcp"
 }
