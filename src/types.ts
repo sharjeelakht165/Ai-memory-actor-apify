@@ -22,6 +22,7 @@ export interface SearchOptions {
 export interface MemoryDetails {
     content?: string;
     title?: string;
+    url?: string;
     memoryType?: string;
     tags?: string[];
     confidence?: number;

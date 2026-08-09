@@ -1,4 +1,4 @@
-import { Actor } from 'apify';
+import { log } from 'apify';
 
 import { normalizeUrl, siteFromUrl, urlMatches } from './url-utils.js';
 import {
@@ -139,6 +139,11 @@ export async function actionRecall(store, input) {
         );
     }
 
+    // Optional type filter (used by MCP recall_memories / HTTP recall)
+    if (input.memoryType) {
+        list = list.filter((m) => m.memoryType === input.memoryType);
+    }
+
     // If query provided, use TF-IDF search for better ranking
     if (input.query) {
         const searchResults = searchEngine.search(input.query, list, { limit: max });
@@ -201,7 +206,7 @@ export async function actionSearch(store, input) {
         }
     }
 
-    Actor.log.info(`Found ${searchResults.length} memories matching "${q}"`);
+    log.info(`Found ${searchResults.length} memories matching "${q}"`);
 
     return {
         action: 'search',
@@ -267,7 +272,7 @@ export async function actionPrune(store, input) {
         await store.setValue(archiveKey, [...existingArchive, ...pruned]);
     }
 
-    Actor.log.info(`Prune complete: ${kept.length} active, ${pruned.length} archived`);
+    log.info(`Prune complete: ${kept.length} active, ${pruned.length} archived`);
 
     return {
         action: 'prune',

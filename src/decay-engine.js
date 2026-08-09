@@ -1,4 +1,4 @@
-import { Actor } from 'apify';
+import { log } from 'apify';
 
 /** @typedef {import('./memory-store.js').MemoryRecord} MemoryRecord */
 
@@ -158,7 +158,7 @@ export class DecayEngine {
         const { active, archived } = this.applyDecay(memories);
 
         if (archived.length > 0 && this.config.enabled) {
-            Actor.log.info(`Pruning ${archived.length} memories (decayed below threshold)`);
+            log.info(`Pruning ${archived.length} memories (decayed below threshold)`);
         }
 
         return { kept: active, pruned: archived };

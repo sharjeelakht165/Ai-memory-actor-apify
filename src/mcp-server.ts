@@ -13,11 +13,16 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
 import { Actor, log } from 'apify';
 import {
-  buildMemoryRecord,
-  deleteMemory,
+  actionForget,
+  actionPrune,
+  actionRecall,
+  actionRemember,
+  actionSearch,
+  actionUpdate,
+} from './actions.js';
+import {
   estimateTokens,
   loadAllMemories,
-  saveMemory,
   sanitizeStoreName,
 } from './memory-store.js';
 
@@ -39,7 +44,9 @@ export interface DecayConfig {
 }
 
 // ---------------------------------------------------------------------------
-// MemoryManager — wraps existing memory-store helpers
+// MemoryManager — thin adapter delegating to the shared action handlers
+// (actions.js), so MCP tools, HTTP endpoints and batch runs all use the same
+// SearchEngine/DecayEngine logic and return identical rankings.
 // ---------------------------------------------------------------------------
 
 export class MemoryManager {
@@ -49,65 +56,46 @@ export class MemoryManager {
     this.store = store;
   }
 
-  /** Store a new memory (or update when memoryId is supplied). */
+  /** Store a new memory via the shared remember action. */
   async storeMemory(params: {
     userId: string;
     content: string;
+    url?: string;
     category?: string;
     tags?: string[];
     importance?: number;
     metadata?: object;
   }) {
-    const record = buildMemoryRecord(
-      {
-        content: params.content,
-        memoryDetails: {
-          title: (params.metadata as any)?.title ?? '',
-          memoryType: params.category ?? 'general',
-          tags: params.tags ?? [],
-          confidence: params.importance ?? 0.8,
-          source: 'agent',
-          relatedUrls: (params.metadata as any)?.relatedUrls ?? [],
-        },
-        url: (params.metadata as any)?.url ?? null,
-        projectId: params.userId,
+    return actionRemember(this.store, {
+      content: params.content,
+      url: params.url ?? (params.metadata as any)?.url ?? null,
+      projectId: params.userId,
+      memoryDetails: {
+        title: (params.metadata as any)?.title ?? '',
+        memoryType: params.category ?? 'general',
+        tags: params.tags ?? [],
+        confidence: params.importance ?? 0.8,
+        source: 'agent',
+        relatedUrls: (params.metadata as any)?.relatedUrls ?? [],
       },
-      null,
-    );
-
-    await saveMemory(this.store, record);
-    return { ok: true, memory: record, message: 'Memory saved' };
+    });
   }
 
-  /** Retrieve memories for a user, optionally filtered by category. */
+  /** Retrieve memories for a user via the shared recall action. */
   async recallMemories(params: {
     userId: string;
     category?: string;
     limit?: number;
   }) {
-    const { memories } = await loadAllMemories(this.store);
-    const limit = params.limit ?? 20;
-
-    let list = memories.filter(
-      (m) => !m.projectId || m.projectId === params.userId,
-    );
-
-    if (params.category) {
-      list = list.filter((m) => m.memoryType === params.category);
-    }
-
-    list = list
-      .sort(
-        (a, b) =>
-          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-      )
-      .slice(0, limit);
-
-    return { ok: true, count: list.length, memories: list };
+    return actionRecall(this.store, {
+      projectId: params.userId,
+      memoryType: params.category,
+      maxResults: params.limit ?? 20,
+    });
   }
 
   /**
-   * Search memories using a TF-IDF–inspired scoring algorithm.
+   * Search memories using the shared TF-IDF SearchEngine (via actionSearch).
    * Signature: searchMemories(userId, query, options?) => SearchResult[]
    */
   async searchMemories(
@@ -115,61 +103,20 @@ export class MemoryManager {
     query: string,
     options?: { limit?: number; category?: string },
   ): Promise<SearchResult[]> {
-    const { memories } = await loadAllMemories(this.store);
-    const limit = options?.limit ?? 20;
-    const q = query.toLowerCase().trim();
-    const qTerms = q.split(/\s+/).filter(Boolean);
-
-    // --- IDF: inverse document frequency per term ---
-    const N = Math.max(memories.length, 1);
-    const docFreq = new Map<string, number>();
-    for (const m of memories) {
-      const blob = `${m.title} ${m.content} ${m.tags.join(' ')} ${m.memoryType}`.toLowerCase();
-      for (const term of qTerms) {
-        if (blob.includes(term)) {
-          docFreq.set(term, (docFreq.get(term) ?? 0) + 1);
-        }
-      }
-    }
-
-    let candidates = memories.filter(
-      (m) => !m.projectId || m.projectId === userId,
-    );
-    if (options?.category) {
-      candidates = candidates.filter((m) => m.memoryType === options.category);
-    }
-
-    const scored: SearchResult[] = [];
-
-    for (const m of candidates) {
-      const blob = `${m.title} ${m.content} ${m.tags.join(' ')} ${m.memoryType}`.toLowerCase();
-      const matchedTerms: string[] = [];
-      let score = 0;
-
-      for (const term of qTerms) {
-        if (blob.includes(term)) {
-          const tf = (blob.match(new RegExp(term, 'g')) ?? []).length;
-          const df = docFreq.get(term) ?? 1;
-          const idf = Math.log(N / df) + 1;
-          score += tf * idf;
-          matchedTerms.push(term);
-        }
-      }
-
-      // Recency boost
-      const ageMs = Date.now() - new Date(m.updatedAt).getTime();
-      const days = ageMs / 86_400_000;
-      score += Math.max(0, 5 - days * 0.5);
-
-      if (score > 0) {
-        scored.push({ memory: m, score, matchedTerms });
-      }
-    }
-
-    return scored.sort((a, b) => b.score - a.score).slice(0, limit);
+    const result = await actionSearch(this.store, {
+      query,
+      projectId: userId,
+      memoryType: options?.category,
+      maxResults: options?.limit ?? 20,
+    });
+    return result.memories.map((memory: Record<string, unknown>, i: number) => ({
+      memory,
+      score: result.scores[i]?.score ?? 0,
+      matchedTerms: result.scores[i]?.matchedTerms ?? [],
+    }));
   }
 
-  /** Update an existing memory by id. */
+  /** Update an existing memory by id via the shared update action. */
   async updateMemory(params: {
     userId: string;
     memoryId: string;
@@ -178,47 +125,20 @@ export class MemoryManager {
     tags?: string[];
     importance?: number;
   }) {
-    const { memories } = await loadAllMemories(this.store);
-    const existing = memories.find(
-      (m) => m.id === params.memoryId && (!m.projectId || m.projectId === params.userId),
-    );
-    if (!existing) {
-      return { ok: false, error: `Memory ${params.memoryId} not found for user ${params.userId}` };
-    }
-
-    const updated = buildMemoryRecord(
-      {
-        memoryId: params.memoryId,
-        content: params.content ?? existing.content,
-        url: existing.url,
-        projectId: params.userId,
-        memoryDetails: {
-          title: existing.title,
-          memoryType: params.category ?? existing.memoryType,
-          tags: params.tags ?? existing.tags,
-          confidence: params.importance ?? existing.confidence,
-          source: existing.source,
-          relatedUrls: existing.relatedUrls,
-        },
+    return actionUpdate(this.store, {
+      memoryId: params.memoryId,
+      content: params.content,
+      updates: {
+        memoryType: params.category,
+        tags: params.tags,
+        confidence: params.importance,
       },
-      existing,
-    );
-
-    await saveMemory(this.store, updated);
-    return { ok: true, memory: updated, message: 'Memory updated' };
+    });
   }
 
-  /** Delete a specific memory by id. */
+  /** Delete a specific memory by id via the shared forget action. */
   async deleteMemory(params: { userId: string; memoryId: string }) {
-    const { memories } = await loadAllMemories(this.store);
-    const existing = memories.find(
-      (m) => m.id === params.memoryId && (!m.projectId || m.projectId === params.userId),
-    );
-    if (!existing) {
-      return { ok: false, error: `Memory ${params.memoryId} not found for user ${params.userId}` };
-    }
-    await deleteMemory(this.store, params.memoryId);
-    return { ok: true, memoryId: params.memoryId, message: 'Memory deleted' };
+    return actionForget(this.store, { memoryId: params.memoryId });
   }
 
   /** Get memory statistics for a user. */
@@ -259,7 +179,8 @@ export class MemoryManager {
   }
 
   /**
-   * Apply temporal decay and prune low-scoring memories.
+   * Apply temporal decay and prune via the shared DecayEngine (actionPrune).
+   * Note: prune operates on the whole bound store — one store = one scope.
    * Signature: pruneMemories(userId, config?) => { pruned, remaining, archived }
    */
   async pruneMemories(
@@ -268,33 +189,20 @@ export class MemoryManager {
   ): Promise<{
     pruned: number;
     remaining: number;
-    archived: Array<Record<string, unknown>>;
+    archived: Array<{ id: string; title: string }>;
   }> {
-    const halfLifeDays = config?.halfLifeDays ?? 30;
-    const pruneThreshold = config?.pruneThreshold ?? 0.1;
-
-    const { memories } = await loadAllMemories(this.store);
-    const userMemories = memories.filter(
-      (m) => !m.projectId || m.projectId === userId,
-    );
-
-    const now = Date.now();
-    const archived: Array<Record<string, unknown>> = [];
-
-    for (const m of userMemories) {
-      const ageMs = now - new Date(m.updatedAt).getTime();
-      const ageDays = ageMs / 86_400_000;
-      // Exponential decay: score = confidence * 2^(-ageDays / halfLifeDays)
-      const decayedScore = m.confidence * Math.pow(2, -ageDays / halfLifeDays);
-
-      if (decayedScore < pruneThreshold) {
-        archived.push({ ...m, decayedScore });
-        await deleteMemory(this.store, m.id);
-      }
-    }
-
-    const remaining = userMemories.length - archived.length;
-    return { pruned: archived.length, remaining, archived };
+    const result = await actionPrune(this.store, {
+      decayConfig: {
+        enabled: true,
+        halfLifeDays: config?.halfLifeDays ?? 30,
+        pruneThreshold: config?.pruneThreshold ?? 0.1,
+      },
+    });
+    return {
+      pruned: result.pruned,
+      remaining: result.remaining,
+      archived: result.archived,
+    };
   }
 }
 
@@ -348,6 +256,7 @@ export function createMemoryMcpServer(manager: MemoryManager): McpServer {
     {
       userId: z.string().describe('Unique identifier for the user or project scope.'),
       content: z.string().describe('The memory content to store. Must be non-empty.'),
+      url: z.string().optional().describe('Optional page URL to scope this memory to. Normalized and used for site matching in recall/search.'),
       category: z.string().optional().describe('Category/type of memory (e.g. "integration_note", "api_quirk", "selector").'),
       tags: z.array(z.string()).optional().describe('Tags for easier retrieval and grouping.'),
       importance: z.number().min(0).max(1).optional().describe('Importance score between 0 and 1 (default 0.8). Higher values resist decay.'),
@@ -528,9 +437,10 @@ export async function startMcpServer(
 
   // --- Connect transport ---
   if (transport === 'sse') {
-    // SSE transport requires an HTTP server — defer to integration layer.
-    // For now, log a message and fall back to stdio.
-    log.warning('SSE transport requested but requires external HTTP server setup. Falling back to stdio.');
+    // stdio mode cannot serve SSE. Remote MCP clients should use server mode
+    // (ACTOR_MODE=server), which serves MCP over Streamable HTTP at /mcp,
+    // or Apify's hosted MCP server. Fall back to stdio.
+    log.warning('SSE transport is not available in stdio mode; use server mode (/mcp endpoint) or Apify hosted MCP for remote clients. Falling back to stdio.');
   }
 
   const stdioTransport = new StdioServerTransport();

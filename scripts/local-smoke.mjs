@@ -55,6 +55,8 @@ function latestDatasetJson() {
 
 let failed = false;
 
+fs.mkdirSync(path.dirname(inputPath), { recursive: true });
+
 for (const step of steps) {
     fs.writeFileSync(inputPath, `${JSON.stringify(step.input, null, 2)}\n`);
     const run = spawnSync(process.execPath, ['src/main.js'], {

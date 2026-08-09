@@ -1,5 +1,5 @@
 import { Actor } from 'apify';
-import { randomUUID } from 'node:crypto';
+import { actionPrune } from './actions.js';
 import {
     sanitizeStoreName,
     loadAllMemories,
@@ -9,15 +9,8 @@ import {
     contentHash,
 } from './memory-store.js';
 import { SearchEngine } from './search-engine.js';
+import { DecayEngine } from './decay-engine.js';
 import type { MemoryDetails, DecayConfig, SearchOptions, SearchResult, Memory } from './types.js';
-
-const DEFAULT_DECAY_CONFIG: DecayConfig = {
-    enabled: true,
-    halfLifeDays: 30,
-    minImportance: 0.1,
-    pruneThreshold: 0.05,
-    maxMemoriesPerUser: 1000,
-};
 
 /**
  * Core memory manager providing CRUD operations, search, decay, and stats
@@ -37,31 +30,27 @@ export class MemoryManager {
         const storeName = sanitizeStoreName(userId);
         const store = await Actor.openKeyValueStore(storeName);
 
-        const id = randomUUID();
-        const now = new Date().toISOString();
-        const content = details.content || '';
+        // Delegate record construction to the shared buildMemoryRecord so all
+        // modes produce identical shapes (url/site normalization, hashing, ids).
+        const record = buildMemoryRecord({
+            content: details.content,
+            url: details.url,
+            memoryDetails: {
+                title: details.title,
+                memoryType: details.memoryType,
+                tags: details.tags,
+                confidence: details.confidence,
+                source: details.source,
+                relatedUrls: details.relatedUrls,
+            },
+        }) as unknown as Memory;
 
-        const memory: Memory = {
-            id,
-            url: null,
-            site: null,
-            title: details.title || content.slice(0, 80),
-            content,
-            memoryType: details.memoryType || 'general',
-            tags: details.tags || [],
-            confidence: details.confidence ?? 0.8,
-            source: details.source || 'agent',
-            projectId: null,
-            relatedUrls: details.relatedUrls || [],
-            createdAt: now,
-            updatedAt: now,
-            contentHash: contentHash(content),
-            importance: details.importance ?? 0.5,
-            category: details.category,
-        };
+        // REST-only extra fields kept on the record for API consumers.
+        record.importance = details.importance ?? 0.5;
+        record.category = details.category;
 
-        await saveMemory(store, memory as any);
-        return memory;
+        await saveMemory(store, record as any);
+        return record;
     }
 
     /**
@@ -72,9 +61,12 @@ export class MemoryManager {
         const store = await Actor.openKeyValueStore(storeName);
         const { memories } = await loadAllMemories(store);
 
-        let results = memories as Memory[];
+        // Apply the shared DecayEngine so decayed memories are filtered
+        // consistently with the batch recall action.
+        const { active } = new DecayEngine().applyDecay(memories);
+        let results = active as Memory[];
         if (category) {
-            results = results.filter((m) => m.category === category);
+            results = results.filter((m) => m.category === category || m.memoryType === category);
         }
 
         return results;
@@ -177,41 +169,21 @@ export class MemoryManager {
         archived: number;
         remaining: number;
     }> {
-        const config = { ...DEFAULT_DECAY_CONFIG, ...decayConfig };
         const storeName = sanitizeStoreName(userId);
         const store = await Actor.openKeyValueStore(storeName);
-        const { memories } = await loadAllMemories(store);
 
-        let pruned = 0;
-        let archived = 0;
-        const now = Date.now();
+        // Delegate to the shared prune action (DecayEngine under the hood),
+        // mapping the REST DecayConfig field names onto the engine's config.
+        const result = await actionPrune(store, {
+            decayConfig: {
+                enabled: decayConfig?.enabled ?? true,
+                halfLifeDays: decayConfig?.halfLifeDays ?? 30,
+                minConfidence: decayConfig?.minImportance ?? 0.1,
+                pruneThreshold: decayConfig?.pruneThreshold ?? 0.05,
+                maxMemoriesPerStore: decayConfig?.maxMemoriesPerUser ?? 1000,
+            },
+        });
 
-        for (const m of memories as any[]) {
-            const importance = m.importance ?? m.confidence ?? 0.5;
-
-            // High-importance memories are exempt from decay
-            if (importance >= 0.9) continue;
-
-            // Calculate decayed importance
-            const lastAccess = new Date(m.updatedAt).getTime();
-            const daysSinceAccess = (now - lastAccess) / (1000 * 60 * 60 * 24);
-            const decayedImportance = importance * Math.pow(0.5, daysSinceAccess / config.halfLifeDays);
-
-            if (decayedImportance < config.pruneThreshold) {
-                // Archive instead of delete
-                m.archived = true;
-                m.decayedImportance = decayedImportance;
-                await saveMemory(store, m);
-                archived++;
-                pruned++;
-            } else {
-                // Update decayed importance
-                m.decayedImportance = decayedImportance;
-                await saveMemory(store, m);
-            }
-        }
-
-        const remaining = memories.length - pruned;
-        return { pruned, archived, remaining };
+        return { pruned: result.pruned, archived: result.pruned, remaining: result.remaining };
     }
 }

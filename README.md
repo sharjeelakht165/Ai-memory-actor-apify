@@ -4,13 +4,13 @@ A powerful Apify actor that gives AI agents persistent long-term memory capabili
 
 ## ✨ Features
 
-- **MCP Server** — Connect any AI agent (Claude, GPT, Cursor, Qoder, etc.) as a memory tool via stdio or SSE transport
+- **MCP Server** — Connect any AI agent (Claude, GPT, Cursor, Qoder, Antigravity, etc.) via local stdio, the Streamable HTTP `/mcp` endpoint in server mode, or Apify's hosted MCP server
 - **HTTP REST API** — Full REST endpoints for any application to integrate with
 - **Smart Search (TF-IDF)** — Intelligent relevance scoring using term frequency-inverse document frequency, with recency, confidence, tag, and URL boost modifiers
 - **Memory Decay & Pruning** — Automatic importance decay over time (configurable half-life), with intelligent pruning that archives rather than deletes
 - **Multi-User Support** — Isolated memory stores per user/agent via `memoryStoreId`
 - **Memory Lifecycle** — Full CRUD with metadata, tags, categories, confidence scoring, content hashing, and token-budgeted context packs
-- **Three Operating Modes** — Actor (batch), HTTP Server, MCP Server — all from one codebase
+- **Three Operating Modes** — Actor (batch), HTTP Server (REST + `/mcp`), MCP stdio — all from one codebase, sharing the same action/search/decay core
 - **Context Packs** — Generate markdown bundles within a token budget for feeding into LLM context windows
 - **Zero External Search Dependencies** — TF-IDF search engine built from scratch, no vector database required
 
@@ -77,21 +77,22 @@ For local actor mode, create `storage/key_value_stores/default/INPUT.json`:
 │                  AI Memory Actor                      │
 ├─────────────────────────────────────────────────────┤
 │                                                       │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
-│  │  Actor   │  │  HTTP    │  │  MCP Server      │  │
-│  │  Mode    │  │  Server  │  │  (stdio/SSE)     │  │
-│  │ (batch)  │  │  Mode    │  │  Mode            │  │
-│  └────┬─────┘  └────┬─────┘  └────┬─────────────┘  │
-│       │              │              │                 │
-│       └──────────────┼──────────────┘                 │
+│  ┌──────────┐  ┌────────────────┐  ┌──────────────┐  │
+│  │  Actor   │  │  HTTP Server   │  │  MCP stdio   │  │
+│  │  Mode    │  │  Mode          │  │  Mode        │  │
+│  │ (batch)  │  │ (REST + /mcp   │  │  (local      │  │
+│  │          │  │  Streamable    │  │   agents)    │  │
+│  │          │  │  HTTP)         │  │              │  │
+│  └────┬─────┘  └────┬───────────┘  └────┬─────────┘  │
+│       │              │                   │            │
+│       └──────────────┼───────────────────┘            │
 │                      │                                │
-│              ┌───────▼────────┐                      │
-│              │ MemoryManager  │                      │
-│              ├────────────────┤                      │
-│              │  CRUD ops      │                      │
-│              │  TF-IDF Search │                      │
-│              │  Decay Engine  │                      │
-│              └───────┬────────┘                      │
+│              ┌───────▼───────────────┐                │
+│              │ Shared action layer   │                │
+│              │ (actions.js +         │                │
+│              │  SearchEngine +       │                │
+│              │  DecayEngine)         │                │
+│              └───────┬───────────────┘                │
 │                      │                                │
 │              ┌───────▼────────┐                      │
 │              │  Apify KV      │                      │
@@ -102,10 +103,10 @@ For local actor mode, create `storage/key_value_stores/default/INPUT.json`:
 
 The actor supports three modes, selected via `ACTOR_MODE` environment variable:
 - **`actor`** (default) — Standard Apify actor input/output, one-shot execution
-- **`server`** — Persistent HTTP REST API server (uses Apify Standby mode)
-- **`mcp`** — MCP server with stdio/SSE transport for AI agent integration
+- **`server`** — Express HTTP server: REST API **plus** an MCP Streamable HTTP endpoint at `/mcp`. Opt in via `ACTOR_MODE=server` (or Apify Standby mode, which sets `ACTOR_WEB_SERVER_PORT`)
+- **`mcp`** — MCP server over **stdio**, intended for **local** agent integration (Claude Desktop, local Cursor, etc.). Stdio is not network-reachable; remote agents should use server mode's `/mcp` endpoint or [Apify's hosted MCP server](https://docs.apify.com/mcp), which wraps this actor automatically
 
-The entry point (`src/main.ts`) routes to the correct mode at startup before initializing the Apify SDK.
+All three modes delegate to the same shared layer — `actions.js`, `SearchEngine` (TF-IDF), and `DecayEngine` — so search rankings and decay behave identically everywhere. The entry point (`src/main.js`) routes to the correct mode at startup before initializing the Apify SDK.
 
 ## 💡 Real Use Cases
 
@@ -113,13 +114,13 @@ The entry point (`src/main.ts`) routes to the correct mode at startup before ini
 
 Connect your chatbot to the memory actor via MCP so it remembers conversations across sessions.
 
-**Claude Desktop Configuration:**
+**Claude Desktop Configuration (local stdio):**
 ```json
 {
     "mcpServers": {
         "memory": {
-            "command": "npx",
-            "args": ["tsx", "src/main.ts"],
+            "command": "node",
+            "args": ["src/main.js"],
             "env": {
                 "ACTOR_MODE": "mcp",
                 "APIFY_TOKEN": "your-apify-token"
@@ -128,6 +129,13 @@ Connect your chatbot to the memory actor via MCP so it remembers conversations a
     }
 }
 ```
+
+**Remote agents (recommended):** connect to Apify's hosted MCP server instead — it wraps this actor as a tool and manages runs for you, no local process needed:
+
+```
+https://mcp.apify.com/?tools=<your-username>/<actor-name>
+```
+(Authenticate with your Apify API token via the `Authorization: Bearer <token>` header.)
 
 Now your Claude Desktop has access to `store_memory`, `search_memories`, `recall_memories`, and more tools. You can say:
 - "Remember that I prefer TypeScript over JavaScript"
@@ -469,11 +477,11 @@ decayedImportance = importance × 0.5^(daysSinceAccess / halfLifeDays)
 | `ACTOR_MODE` | Operating mode: `actor`, `server`, `mcp` | `actor` |
 | `APIFY_TOKEN` | Your Apify API token (required for all modes) | — |
 | `ACTOR_WEB_SERVER_PORT` | Port for HTTP server mode | `3000` |
-| `MCP_TRANSPORT` | MCP transport type: `stdio` or `sse` | `stdio` |
+| `MCP_TRANSPORT` | MCP transport for `ACTOR_MODE=mcp` (stdio only; remote clients should use server mode's `/mcp`) | `stdio` |
 
 ### Apify Platform Configuration
-- Enable **Standby mode** in actor settings for persistent HTTP server or MCP SSE mode
-- Set `APIFY_TOKEN` as an environment variable in actor configuration
+- **Standby mode is disabled by default** so API / `call-actor` invocations complete as fast one-shot actions (results in the dataset within seconds). To run the persistent HTTP server + `/mcp` endpoint on Apify, set `ACTOR_MODE=server` as a run/build environment variable, or re-enable `usesStandbyMode` in `.actor/actor.json`
+- For remote MCP clients, the simplest integration is **Apify's hosted MCP server** (`https://mcp.apify.com`) — it wraps the plain batch actor automatically, no standby required
 - The actor uses **named key-value stores** derived from `memoryStoreId` for persistence
 
 ### Storage Model
@@ -541,18 +549,19 @@ Publish to Apify Store when ready. A quality README and input schema improve MCP
 ```
 .actor/
   actor.json              — Actor configuration, metadata, and standby mode settings
-  input_schema.json       — Input schema for Apify platform UI
+  INPUT_SCHEMA.json       — Input schema for Apify platform UI
+  output_schema.json      — Output schema (dataset + OUTPUT record links)
   Dockerfile              — Docker build configuration (Node 22)
 src/
-  main.ts                 — Entry point with mode routing (actor/server/mcp)
-  main.js                 — Original JavaScript entry point
+  main.js                 — Entry point with mode routing (actor/server/mcp)
   types.ts                — TypeScript interfaces (Memory, MemoryDetails, DecayConfig, etc.)
-  actions.js              — Action handlers (remember, recall, search, forget, context_pack)
+  actions.js              — Shared action handlers (remember, recall, search, forget, context_pack, update, prune)
   memory-store.js         — Core KV storage operations (CRUD, manifest management)
-  memory-manager.ts       — High-level MemoryManager class wrapping storage + search + decay
+  memory-manager.ts       — MemoryManager adapter for the HTTP REST API (delegates to shared engines)
   search-engine.js        — TF-IDF search engine with multi-factor relevance scoring
-  server.ts               — Express HTTP API server with full REST endpoints
-  mcp-server.ts           — MCP server with stdio and SSE transport, tool definitions
+  decay-engine.js         — Temporal decay and pruning engine
+  server.ts               — Express HTTP server: REST API + MCP Streamable HTTP endpoint at /mcp
+  mcp-server.ts           — MCP tool definitions; stdio transport for local use + HTTP handler for server mode
   url-utils.js            — URL normalization, site extraction, URL matching utilities
 test/
   url-utils.test.js       — Unit tests for URL utilities
