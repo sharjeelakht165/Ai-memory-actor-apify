@@ -20,5 +20,5 @@ EXPOSE 3000
 # - "mcp": MCP server mode (stdio transport, local only)
 ENV ACTOR_MODE=actor
 
-# Run the batch entry point directly (pure JS, no compilation needed)
-CMD ["node", "src/batch.js"]
+# Run the batch entry point via npm start
+CMD npm start --silent

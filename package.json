@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Persistent website memory for AI coding agents (MCP via Apify)",
   "scripts": {
-    "start": "node src/main.js",
+    "start": "node src/batch.js",
     "start:server": "ACTOR_MODE=server tsx src/server.ts",
     "start:mcp": "ACTOR_MODE=mcp tsx src/mcp-server.ts",
     "test": "node --test test/*.test.js",
