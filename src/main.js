@@ -17,6 +17,12 @@ const standbyPort = process.env.ACTOR_WEB_SERVER_PORT;
 const isServerMode = actorMode === 'server' || !!standbyPort;
 const isMcpMode = actorMode === 'mcp';
 
+log.info('Mode detection', {
+    actorMode: actorMode || '(unset)',
+    standbyPort: standbyPort || '(unset)',
+    selected: isServerMode ? 'server' : isMcpMode ? 'mcp' : 'actor (batch)',
+});
+
 // --- Standby / HTTP server mode ---
 if (isServerMode) {
     log.info('Starting in HTTP server mode (standby)', { port: standbyPort });
