@@ -26,13 +26,13 @@ log.info('Mode detection', {
 // --- Standby / HTTP server mode ---
 if (isServerMode) {
     log.info('Starting in HTTP server mode (standby)', { port: standbyPort });
-    const { startServer } = await import('./server.ts');
+    const { startServer } = await import('./server.js');
     await startServer();
     // Keep the process alive — the Express server is running.
 } else if (isMcpMode) {
     // --- MCP server mode (stdio transport) ---
     log.info('Starting in MCP server mode');
-    const { startMcpServer } = await import('./mcp-server.ts');
+    const { startMcpServer } = await import('./mcp-server.js');
     await startMcpServer();
 } else {
     // --- Standard actor (batch) mode ---

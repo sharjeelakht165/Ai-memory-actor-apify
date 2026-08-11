@@ -20,5 +20,5 @@ EXPOSE 3000
 # - "mcp": MCP server mode (stdio transport, local only)
 ENV ACTOR_MODE=actor
 
-# Run the pre-compiled batch entry point (reads INPUT, runs action, exits)
-CMD ["node", "dist/main.js"]
+# Run the batch entry point directly (pure JS, no compilation needed)
+CMD ["node", "src/batch.js"]
