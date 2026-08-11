@@ -5,7 +5,7 @@ COPY package*.json ./
 
 # Install production dependencies only (dist/ is pre-compiled and committed)
 RUN npm --quiet set progress=false \
-    && npm install --omit=dev --omit=optional \
+    && npm install \
     && rm -rf ~/.npm
 
 # Copy source code and pre-compiled dist/
