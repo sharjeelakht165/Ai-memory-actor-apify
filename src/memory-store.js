@@ -37,9 +37,9 @@ export function sanitizeStoreName(memoryStoreId) {
     const cleaned = memoryStoreId
         .trim()
         .toLowerCase()
-        .replace(/[^a-z0-9~_-]+/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^[-~]+|[-~]+$/g, '');
+        .replace(/[^a-z0-9-]+/g, '-')   // replace ALL non-alphanumeric-hyphen chars (including ~) with -
+        .replace(/-+/g, '-')             // collapse multiple hyphens
+        .replace(/^-+|-+$/g, '');        // strip leading/trailing hyphens
     const name = cleaned || 'default-site-memory';
     return name.length > 63 ? name.slice(0, 63) : name;
 }
