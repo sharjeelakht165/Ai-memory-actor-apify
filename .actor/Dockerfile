@@ -18,7 +18,7 @@ EXPOSE 3000
 # - "actor": Standard Apify actor input/output mode (batch, one-shot)
 # - "server": HTTP API server mode with REST + /mcp Streamable HTTP endpoint (default, standby)
 # - "mcp": MCP server mode (stdio transport, local only)
-ENV ACTOR_MODE=server
+ENV ACTOR_MODE=actor
 
-# Run the pre-compiled server entry point
-CMD ["node", "dist/server-entry.js"]
+# Run the pre-compiled batch entry point (reads INPUT, runs action, exits)
+CMD ["node", "dist/main.js"]
