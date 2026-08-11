@@ -1,0 +1,302 @@
+import { Actor } from 'apify';
+import { normalizeUrl, siteFromUrl, urlMatches } from './url-utils.js';
+import { buildMemoryRecord, deleteMemory, estimateTokens, loadAllMemories, saveMemory, } from './memory-store.js';
+import { SearchEngine } from './search-engine.js';
+import { DecayEngine } from './decay-engine.js';
+/** Shared search engine instance */
+const searchEngine = new SearchEngine();
+/**
+ * @param {MemoryRecord[]} memories
+ * @param {string | null | undefined} projectId
+ */
+function filterByProject(memories, projectId) {
+    if (!projectId)
+        return memories;
+    return memories.filter((m) => !m.projectId || m.projectId === projectId);
+}
+/**
+ * @param {MemoryRecord} memory
+ * @param {string | null} url
+ * @param {string | null} query
+ */
+function scoreMemory(memory, url, query) {
+    let score = 0;
+    const q = (query || '').toLowerCase().trim();
+    const qTerms = q ? q.split(/\s+/).filter(Boolean) : [];
+    if (url) {
+        if (memory.url && urlMatches(memory.url, url))
+            score += 50;
+        else if (memory.site && siteFromUrl(url) === memory.site)
+            score += 25;
+    }
+    if (qTerms.length) {
+        const blob = `${memory.title} ${memory.content} ${memory.tags.join(' ')} ${memory.memoryType}`.toLowerCase();
+        for (const term of qTerms) {
+            if (blob.includes(term))
+                score += 8;
+        }
+    }
+    const ageMs = Date.now() - new Date(memory.updatedAt).getTime();
+    const days = ageMs / (86400 * 1000);
+    score += Math.max(0, 10 - days);
+    return score;
+}
+/**
+ * @param {import('apify').KeyValueStore} store
+ * @param {object} input
+ */
+export async function actionRemember(store, input) {
+    if (!input.content || !String(input.content).trim()) {
+        throw new Error('remember requires non-empty content');
+    }
+    let existing = null;
+    if (input.memoryId) {
+        const all = await loadAllMemories(store);
+        existing = all.memories.find((m) => m.id === input.memoryId) || null;
+    }
+    const record = buildMemoryRecord(input, existing);
+    await saveMemory(store, record);
+    return {
+        action: 'remember',
+        ok: true,
+        memory: record,
+        message: existing ? 'Memory updated' : 'Memory saved',
+    };
+}
+/**
+ * Update an existing memory by merging new details into it.
+ * Requires memoryId to identify the target memory.
+ * @param {import('apify').KeyValueStore} store
+ * @param {object} input
+ */
+export async function actionUpdate(store, input) {
+    if (!input.memoryId)
+        throw new Error('update requires memoryId');
+    const { memories } = await loadAllMemories(store);
+    const existing = memories.find((m) => m.id === input.memoryId);
+    if (!existing) {
+        throw new Error(`Memory not found: ${input.memoryId}`);
+    }
+    // Merge new details into the existing memory
+    const updates = input.updates || {};
+    const now = new Date().toISOString();
+    existing.title = updates.title ?? existing.title;
+    existing.content = input.content || existing.content;
+    existing.memoryType = updates.memoryType ?? existing.memoryType;
+    existing.tags = Array.isArray(updates.tags) ? updates.tags.map(String) : existing.tags;
+    existing.confidence = typeof updates.confidence === 'number' ? updates.confidence : existing.confidence;
+    existing.importance = typeof updates.importance === 'number' ? updates.importance : existing.importance;
+    existing.category = updates.category ?? existing.category;
+    existing.source = updates.source ?? existing.source;
+    existing.relatedUrls = Array.isArray(updates.relatedUrls) ? updates.relatedUrls : existing.relatedUrls;
+    existing.updatedAt = now;
+    await saveMemory(store, existing);
+    return {
+        action: 'update',
+        ok: true,
+        memory: existing,
+        message: 'Memory updated',
+    };
+}
+/**
+ * @param {import('apify').KeyValueStore} store
+ * @param {object} input
+ */
+export async function actionRecall(store, input) {
+    const { memories } = await loadAllMemories(store);
+    const url = normalizeUrl(input.url);
+    const max = input.maxResults ?? 20;
+    let list = filterByProject(memories, input.projectId);
+    // Apply decay (disabled by default in local/test environments)
+    const decayEngine = new DecayEngine(input.decayConfig);
+    const { active } = decayEngine.applyDecay(list);
+    list = active;
+    if (url) {
+        list = list.filter((m) => (m.url && urlMatches(m.url, url)) || (m.site && siteFromUrl(url) === m.site));
+    }
+    // If query provided, use TF-IDF search for better ranking
+    if (input.query) {
+        const searchResults = searchEngine.search(input.query, list, { limit: max });
+        list = searchResults.map((r) => r.memory);
+    }
+    else {
+        list = list
+            .map((m) => ({ memory: m, score: scoreMemory(m, url, input.query) }))
+            .sort((a, b) => b.score - a.score)
+            .slice(0, max)
+            .map((x) => x.memory);
+    }
+    return {
+        action: 'recall',
+        ok: true,
+        url,
+        count: list.length,
+        memories: list,
+    };
+}
+/**
+ * @param {import('apify').KeyValueStore} store
+ * @param {object} input
+ */
+export async function actionSearch(store, input) {
+    const q = (input.query || '').trim();
+    if (!q)
+        throw new Error('search requires query');
+    const { memories } = await loadAllMemories(store);
+    const max = input.maxResults ?? 20;
+    let list = filterByProject(memories, input.projectId);
+    // Apply decay (disabled by default in local/test environments)
+    const decayEngine = new DecayEngine(input.decayConfig);
+    const { active } = decayEngine.applyDecay(list);
+    list = active;
+    // Use TF-IDF search engine for intelligent ranking
+    const searchResults = searchEngine.search(q, list, {
+        limit: max,
+        memoryType: input.memoryType,
+        includeArchived: input.includeArchived ?? false,
+        minScore: input.minScore ?? 0,
+        projectId: input.projectId,
+    });
+    // Update access metadata for returned memories
+    if (searchResults.length > 0) {
+        const now = new Date().toISOString();
+        const resultIds = new Set(searchResults.map((r) => r.memory.id));
+        for (const memory of memories) {
+            if (resultIds.has(memory.id)) {
+                memory.updatedAt = now;
+            }
+        }
+        // Save updated access times (only for touched memories)
+        for (const { memory } of searchResults) {
+            await saveMemory(store, memory);
+        }
+    }
+    Actor.log.info(`Found ${searchResults.length} memories matching "${q}"`);
+    return {
+        action: 'search',
+        ok: true,
+        query: q,
+        count: searchResults.length,
+        memories: searchResults.map((r) => r.memory),
+        scores: searchResults.map((r) => ({ id: r.memory.id, score: r.score, matchedTerms: r.matchedTerms })),
+    };
+}
+/**
+ * @param {import('apify').KeyValueStore} store
+ * @param {object} input
+ */
+export async function actionForget(store, input) {
+    if (!input.memoryId)
+        throw new Error('forget requires memoryId');
+    await deleteMemory(store, input.memoryId);
+    return {
+        action: 'forget',
+        ok: true,
+        memoryId: input.memoryId,
+        message: 'Memory deleted',
+    };
+}
+/**
+ * @param {MemoryRecord} m
+ */
+function formatMemoryBlock(m) {
+    const lines = [
+        `### ${m.title}`,
+        `- **Type:** ${m.memoryType}`,
+        `- **URL:** ${m.url || '(none)'}`,
+        `- **Updated:** ${m.updatedAt}`,
+    ];
+    if (m.tags.length)
+        lines.push(`- **Tags:** ${m.tags.join(', ')}`);
+    if (m.projectId)
+        lines.push(`- **Project:** ${m.projectId}`);
+    lines.push('', m.content, '');
+    return lines.join('\n');
+}
+/**
+ * Prune decayed memories: archive low-confidence memories to a separate store key.
+ * When decay is disabled, no memories are pruned.
+ * @param {import('apify').KeyValueStore} store
+ * @param {object} input
+ */
+export async function actionPrune(store, input) {
+    const { memories } = await loadAllMemories(store);
+    const decayEngine = new DecayEngine(input.decayConfig);
+    const { kept, pruned } = decayEngine.prune(memories);
+    // Save active memories back (update manifest)
+    for (const memory of kept) {
+        await saveMemory(store, memory);
+    }
+    // Archive pruned memories to a separate key
+    if (pruned.length > 0) {
+        const archiveKey = 'archived_memories';
+        const existingArchive = /** @type {MemoryRecord[]} */ (await store.getValue(archiveKey)) || [];
+        await store.setValue(archiveKey, [...existingArchive, ...pruned]);
+    }
+    Actor.log.info(`Prune complete: ${kept.length} active, ${pruned.length} archived`);
+    return {
+        action: 'prune',
+        ok: true,
+        pruned: pruned.length,
+        remaining: kept.length,
+        archived: pruned.map((m) => ({ id: m.id, title: m.title })),
+        decayEnabled: decayEngine.isEnabled(),
+    };
+}
+/**
+ * @param {import('apify').KeyValueStore} store
+ * @param {object} input
+ */
+export async function actionContextPack(store, input) {
+    const url = normalizeUrl(input.url);
+    const maxTokens = input.maxTokens ?? 2500;
+    const { memories } = await loadAllMemories(store);
+    let candidates = filterByProject(memories, input.projectId);
+    if (url) {
+        const site = siteFromUrl(url);
+        candidates = candidates.filter((m) => (m.url && urlMatches(m.url, url)) || m.site === site);
+    }
+    const ranked = candidates
+        .map((m) => ({ memory: m, score: scoreMemory(m, url, input.query) }))
+        .sort((a, b) => b.score - a.score);
+    /** @type {MemoryRecord[]} */
+    const used = [];
+    const warnings = [];
+    const headerParts = ['## Site memory context pack'];
+    if (url)
+        headerParts.push(`**Target URL:** ${url}`);
+    if (input.projectId)
+        headerParts.push(`**Project:** ${input.projectId}`);
+    if (input.query)
+        headerParts.push(`**Query:** ${input.query}`);
+    let markdown = `${headerParts.join('\n')}\n\n`;
+    let tokens = estimateTokens(markdown);
+    if (!ranked.length) {
+        warnings.push('No memories matched. Use action remember after learning something about this site.');
+        markdown += '_No stored memories yet for this URL/site._\n';
+    }
+    else {
+        for (const { memory } of ranked) {
+            const block = formatMemoryBlock(memory);
+            const blockTokens = estimateTokens(block);
+            if (tokens + blockTokens > maxTokens)
+                break;
+            markdown += block;
+            tokens += blockTokens;
+            used.push(memory);
+        }
+        if (used.length < ranked.length) {
+            warnings.push(`Truncated to ~${maxTokens} token budget; ${ranked.length - used.length} memories omitted.`);
+        }
+    }
+    return {
+        action: 'context_pack',
+        ok: true,
+        url,
+        contextMarkdown: markdown,
+        memoriesUsed: used.map((m) => ({ id: m.id, title: m.title, url: m.url, memoryType: m.memoryType })),
+        tokenEstimate: tokens,
+        warnings,
+    };
+}
+//# sourceMappingURL=actions.js.map
