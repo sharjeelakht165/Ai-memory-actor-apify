@@ -12,7 +12,7 @@ RUN npm --quiet set progress=false \
 COPY . ./
 
 # Compile TypeScript to dist/
-RUN npx tsc --project tsconfig.json
+RUN ./node_modules/.bin/tsc --project tsconfig.json
 
 # Remove dev dependencies after build to keep the image lean
 RUN npm prune --omit=dev
