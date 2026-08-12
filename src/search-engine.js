@@ -33,12 +33,100 @@ const STOPWORDS = new Set([
     'this', 'that', 'these', 'those', 'it', 'its', 'they', 'them', 'their',
     'what', 'which', 'who', 'whom', 'when', 'where', 'why', 'how',
     'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'him', 'his', 'she', 'her',
+    // extended — common filler words that add no search signal
+    'also', 'just', 'only', 'then', 'than', 'more', 'most', 'some', 'such',
+    'each', 'all', 'any', 'few', 'own', 'same', 'other', 'another', 'about',
+    'up', 'out', 'if', 'no', 'very', 'here', 'there', 'now', 'back',
 ]);
+
+/**
+ * Lightweight suffix-stripping stemmer.
+ * Reduces common English word forms to a shared root so that
+ * "authentication" and "authenticate", "running" and "runs",
+ * "configured" and "configuration" all match each other.
+ *
+ * Rules applied in order (longest suffix first):
+ *   -ations → (remove 5 chars)
+ *   -ation  → (remove 4 chars)
+ *   -ating  → (remove 4 chars, keep stem + e implied)
+ *   -ations, -nesses, -ments → strip to root
+ *   -ness   → strip
+ *   -ment   → strip
+ *   -ings   → strip
+ *   -ing    → strip (if stem >= 3 chars)
+ *   -tion   → strip
+ *   -ated   → strip
+ *   -able   → strip
+ *   -ible   → strip
+ *   -edly   → strip
+ *   -ful    → strip
+ *   -less   → strip
+ *   -ness   → strip
+ *   -ed     → strip (if stem >= 3 chars)
+ *   -er     → strip (if stem >= 3 chars)
+ *   -est    → strip (if stem >= 3 chars)
+ *   -ly     → strip (if stem >= 3 chars)
+ *   -s      → strip (if stem >= 3 chars and not a stopword root)
+ *
+ * @param {string} word - already lowercase, no punctuation
+ * @returns {string} stemmed word
+ */
+function stem(word) {
+    const len = word.length;
+    if (len <= 3) return word;
+
+    // longest suffixes first to avoid over-stripping
+    if (len > 7 && word.endsWith('ations'))  return word.slice(0, -6);
+    if (len > 7 && word.endsWith('nesses'))  return word.slice(0, -6);
+    if (len > 6 && word.endsWith('ments'))   return word.slice(0, -5);
+    if (len > 6 && word.endsWith('ation'))   return word.slice(0, -5);
+    if (len > 6 && word.endsWith('ating'))   return word.slice(0, -5);
+    if (len > 6 && word.endsWith('iness'))   return word.slice(0, -5) + 'y';
+    if (len > 5 && word.endsWith('ment'))    return word.slice(0, -4);
+    if (len > 5 && word.endsWith('ness'))    return word.slice(0, -4);
+    if (len > 5 && word.endsWith('ings'))    return word.slice(0, -4);
+    if (len > 5 && word.endsWith('tion'))    return word.slice(0, -4);
+    if (len > 5 && word.endsWith('ated'))    return word.slice(0, -4);
+    if (len > 5 && word.endsWith('able'))    return word.slice(0, -4);
+    if (len > 5 && word.endsWith('ible'))    return word.slice(0, -4);
+    if (len > 5 && word.endsWith('edly'))    return word.slice(0, -4);
+    if (len > 5 && word.endsWith('less'))    return word.slice(0, -4);
+    if (len > 4 && word.endsWith('ing')) {
+        const s = word.slice(0, -3);
+        return s.length >= 3 ? s : word;
+    }
+    if (len > 4 && word.endsWith('ful'))     return word.slice(0, -3);
+    if (len > 4 && word.endsWith('ers'))     return word.slice(0, -3);
+    if (len > 4 && word.endsWith('ies'))     return word.slice(0, -3) + 'y';
+    if (len > 4 && word.endsWith('ed')) {
+        const s = word.slice(0, -2);
+        return s.length >= 3 ? s : word;
+    }
+    if (len > 4 && word.endsWith('er')) {
+        const s = word.slice(0, -2);
+        return s.length >= 3 ? s : word;
+    }
+    if (len > 4 && word.endsWith('ly')) {
+        const s = word.slice(0, -2);
+        return s.length >= 3 ? s : word;
+    }
+    if (len > 4 && word.endsWith('es')) {
+        const s = word.slice(0, -2);
+        return s.length >= 3 ? s : word;
+    }
+    if (len > 4 && word.endsWith('s') && !word.endsWith('ss')) {
+        const s = word.slice(0, -1);
+        return s.length >= 3 ? s : word;
+    }
+
+    return word;
+}
 
 export class SearchEngine {
     /**
-     * Tokenize text into lowercase terms.
-     * Lowercase, split on non-alphanumeric, remove stopwords and single chars.
+     * Tokenize text into lowercase stemmed terms.
+     * Lowercase, split on non-alphanumeric, remove stopwords, single chars,
+     * then apply suffix-stripping stemmer so word variants match each other.
      * @param {string} text
      * @returns {string[]}
      */
@@ -47,7 +135,8 @@ export class SearchEngine {
             .toLowerCase()
             .replace(/[^a-z0-9\s]/g, ' ')
             .split(/\s+/)
-            .filter((term) => term.length > 1 && !STOPWORDS.has(term));
+            .filter((term) => term.length > 1 && !STOPWORDS.has(term))
+            .map(stem);
     }
 
     /**
@@ -72,7 +161,8 @@ export class SearchEngine {
 
     /**
      * Calculate inverse document frequency across all documents.
-     * IDF(t) = log(N / df(t)) where df = number of docs containing term
+     * IDF(t) = log((N + 1) / (df(t) + 1)) + 1  — smoothed to handle small corpora
+     * and avoid zero division. The +1 at the end ensures IDF is never negative.
      * @param {string[][]} documents - array of tokenized documents
      * @returns {Map<string, number>}
      */
@@ -90,7 +180,8 @@ export class SearchEngine {
         }
 
         for (const [term, freq] of df) {
-            idf.set(term, Math.log(N / freq));
+            // Smoothed IDF: log((N+1)/(df+1)) + 1
+            idf.set(term, Math.log((N + 1) / (freq + 1)) + 1);
         }
         return idf;
     }
@@ -163,10 +254,12 @@ export class SearchEngine {
                     matchedTerms.push(queryTerm);
                 }
 
-                // Partial match bonus: check if query term is a substring of any doc term
+                // Partial/stem match bonus: check if stemmed query term is a
+                // substring of any stemmed doc term (catches compound words)
                 if (termTF === 0) {
+                    const stemmedQuery = stem(queryTerm);
                     for (const docTerm of docTerms[idx]) {
-                        if (docTerm.includes(queryTerm) || queryTerm.includes(docTerm)) {
+                        if (docTerm.includes(stemmedQuery) || stemmedQuery.includes(docTerm)) {
                             tfidfScore += 0.05;
                             if (!matchedTerms.includes(queryTerm)) {
                                 matchedTerms.push(queryTerm);
@@ -182,9 +275,9 @@ export class SearchEngine {
             const recency = this.recencyBoost(memory) * 0.2;           // recency contributes 20%
             const typeBoost = memoryType && memory.memoryType === memoryType ? 0.1 : 0;
 
-            // Tag exact match bonus
+            // Tag exact match bonus — stem both sides for variant matching
             const tagBoost = memory.tags.some((tag) =>
-                queryTerms.some((qt) => tag.toLowerCase().includes(qt)),
+                queryTerms.some((qt) => stem(tag.toLowerCase()).includes(qt) || tag.toLowerCase().includes(qt)),
             ) ? 0.15 : 0;
 
             // URL/site relevance bonus

@@ -343,3 +343,161 @@ export async function actionContextPack(store, input) {
         warnings,
     };
 }
+
+// ---------------------------------------------------------------------------
+// Chunking helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Split text into chunks by paragraph, respecting a max token size.
+ * Strategy:
+ *   1. Split on double-newline (paragraph boundary)
+ *   2. If a paragraph exceeds maxTokens, split further by sentence
+ *   3. Accumulate paragraphs into a chunk until the next would exceed maxTokens
+ *
+ * @param {string} text
+ * @param {number} maxTokens
+ * @returns {string[]}
+ */
+function splitIntoChunks(text, maxTokens) {
+    const paragraphs = text
+        .split(/\n{2,}/)
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0);
+
+    /** @type {string[]} */
+    const chunks = [];
+    let current = '';
+
+    for (const para of paragraphs) {
+        // If this single paragraph is too large, split by sentence
+        const paraTokens = estimateTokens(para);
+        const parts = paraTokens > maxTokens
+            ? para.match(/[^.!?]+[.!?]+/g)?.map((s) => s.trim()).filter(Boolean) ?? [para]
+            : [para];
+
+        for (const part of parts) {
+            const combined = current ? `${current}\n\n${part}` : part;
+            if (estimateTokens(combined) > maxTokens && current) {
+                chunks.push(current.trim());
+                current = part;
+            } else {
+                current = combined;
+            }
+        }
+    }
+
+    if (current.trim()) chunks.push(current.trim());
+    return chunks;
+}
+
+/**
+ * Extract the top N significant terms from a chunk using the search engine's
+ * tokenizer. Used to auto-generate tags for each chunk.
+ *
+ * @param {string} text
+ * @param {number} [n=5]
+ * @returns {string[]}
+ */
+function extractTopTerms(text, n = 5) {
+    const terms = searchEngine.tokenize(text);
+    const freq = new Map();
+    for (const t of terms) freq.set(t, (freq.get(t) || 0) + 1);
+    return [...freq.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, n)
+        .map(([t]) => t);
+}
+
+// ---------------------------------------------------------------------------
+// actionChunk
+// ---------------------------------------------------------------------------
+
+/**
+ * Split a document into chunks and store each as a separate memory.
+ *
+ * Input fields:
+ *   - content {string}        The full document text to chunk and store
+ *   - memoryStoreId {string}  Target memory store
+ *   - maxTokensPerChunk {number} Max tokens per chunk (default 400)
+ *   - url {string}            Optional source URL applied to all chunks
+ *   - projectId {string}      Optional project scope
+ *   - memoryDetails {object}  Optional base metadata (title, memoryType, tags,
+ *                             confidence, importance, category, source).
+ *                             title is used as a prefix: "Title — chunk 1 of N"
+ *                             tags are merged with auto-extracted terms.
+ *
+ * Returns:
+ *   - action: 'chunk'
+ *   - ok: true
+ *   - chunkCount: number of chunks created
+ *   - memoryIds: array of created memory IDs
+ *   - chunks: array of { index, title, tokens, memoryId } for each chunk
+ *
+ * @param {import('apify').KeyValueStore} store
+ * @param {object} input
+ */
+export async function actionChunk(store, input) {
+    const text = (input.content || '').trim();
+    if (!text) throw new Error('chunk requires non-empty content');
+
+    const maxTokensPerChunk = input.maxTokensPerChunk ?? 400;
+    const baseDetails = input.memoryDetails || {};
+    const baseTitle = baseDetails.title || 'Document';
+    const baseTags = Array.isArray(baseDetails.tags) ? baseDetails.tags : [];
+    const baseType = baseDetails.memoryType || 'general';
+    const baseConfidence = typeof baseDetails.confidence === 'number' ? baseDetails.confidence : 0.9;
+    const baseImportance = typeof baseDetails.importance === 'number' ? baseDetails.importance : 0.8;
+    const baseCategory = baseDetails.category || 'document';
+    const baseSource = baseDetails.source || 'agent';
+
+    const rawChunks = splitIntoChunks(text, maxTokensPerChunk);
+    const total = rawChunks.length;
+
+    if (total === 0) throw new Error('chunk: document produced no chunks after splitting');
+
+    log.info(`Chunking document into ${total} chunks`, { baseTitle, maxTokensPerChunk });
+
+    /** @type {{ index: number, title: string, tokens: number, memoryId: string }[]} */
+    const chunkMeta = [];
+    const memoryIds = [];
+
+    for (let i = 0; i < rawChunks.length; i++) {
+        const chunkText = rawChunks[i];
+        const chunkTitle = total === 1 ? baseTitle : `${baseTitle} — chunk ${i + 1} of ${total}`;
+        const autoTags = extractTopTerms(chunkText, 5);
+        // Merge base tags with auto-extracted terms, deduplicate
+        const mergedTags = [...new Set([...baseTags, ...autoTags])].slice(0, 15);
+        const tokens = estimateTokens(chunkText);
+
+        const record = buildMemoryRecord({
+            content: chunkText,
+            url: input.url || null,
+            projectId: input.projectId || null,
+            memoryDetails: {
+                title: chunkTitle,
+                memoryType: baseType,
+                tags: mergedTags,
+                confidence: baseConfidence,
+                importance: baseImportance,
+                category: baseCategory,
+                source: baseSource,
+            },
+        }, null);
+
+        await saveMemory(store, record);
+
+        memoryIds.push(record.id);
+        chunkMeta.push({ index: i + 1, title: chunkTitle, tokens, memoryId: record.id });
+
+        log.info(`Stored chunk ${i + 1}/${total}`, { id: record.id, tokens, tags: mergedTags });
+    }
+
+    return {
+        action: 'chunk',
+        ok: true,
+        chunkCount: total,
+        memoryIds,
+        chunks: chunkMeta,
+    };
+}

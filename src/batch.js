@@ -5,6 +5,7 @@
  */
 import { Actor, log } from 'apify';
 import {
+    actionChunk,
     actionContextPack,
     actionForget,
     actionPrune,
@@ -76,6 +77,9 @@ try {
         }
         case 'prune':
             result = await actionPrune(store, input);
+            break;
+        case 'chunk':
+            result = await actionChunk(store, input);
             break;
         default:
             throw new Error(`Unknown action: ${action}`);

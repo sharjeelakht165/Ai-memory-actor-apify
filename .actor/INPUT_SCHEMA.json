@@ -6,9 +6,9 @@
     "action": {
       "title": "Action",
       "type": "string",
-      "description": "REQUIRED. Operation to perform: remember | recall | search | forget | context_pack | update | stats | prune",
-      "enum": ["remember", "recall", "search", "forget", "context_pack", "update", "stats", "prune"],
-      "enumTitles": ["Remember", "Recall", "Search", "Forget", "Context Pack", "Update", "Stats", "Prune"],
+      "description": "REQUIRED. Operation to perform: remember | recall | search | forget | context_pack | update | stats | prune | chunk",
+      "enum": ["remember", "recall", "search", "forget", "context_pack", "update", "stats", "prune", "chunk"],
+      "enumTitles": ["Remember", "Recall", "Search", "Forget", "Context Pack", "Update", "Stats", "Prune", "Chunk"],
       "default": "remember",
       "prefill": "remember"
     },
@@ -69,6 +69,14 @@
       "default": 2500,
       "minimum": 200,
       "maximum": 8000
+    },
+    "maxTokensPerChunk": {
+      "title": "Max Tokens Per Chunk",
+      "type": "integer",
+      "description": "For chunk action: max tokens per chunk before splitting. Default 400.",
+      "default": 400,
+      "minimum": 50,
+      "maximum": 4000
     },
     "idempotencyKey": {
       "title": "Idempotency Key",
