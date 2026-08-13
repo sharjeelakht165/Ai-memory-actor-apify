@@ -32,6 +32,7 @@
       "type": "string",
       "description": "Text to save when action is remember.",
       "editor": "textarea",
+      "prefill": "This is a test memory saved during automated QA validation.",
       "maxLength": 200000
     },
     "query": {
