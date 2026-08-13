@@ -9,8 +9,8 @@
       "description": "REQUIRED. Operation to perform: remember | recall | search | forget | context_pack | update | stats | prune | chunk",
       "enum": ["remember", "recall", "search", "forget", "context_pack", "update", "stats", "prune", "chunk"],
       "enumTitles": ["Remember", "Recall", "Search", "Forget", "Context Pack", "Update", "Stats", "Prune", "Chunk"],
-      "default": "remember",
-      "prefill": "remember"
+      "default": "stats",
+      "prefill": "stats"
     },
     "memoryStoreId": {
       "title": "Memory Store ID",
