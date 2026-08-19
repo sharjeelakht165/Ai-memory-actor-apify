@@ -1,19 +1,20 @@
-{
+﻿{
+    "$schema": "https://apify-projects.github.io/actor-json-schemas/output.json?v=0.3",
     "actorOutputSchemaVersion": 1,
-    "title": "Output schema of AI Memory Actor",
-    "description": "Result of the requested memory action (remember, recall, search, forget, context_pack, update, stats, prune).",
+    "title": "AI Memory Actor Output",
+    "description": "Output of the AI Memory Actor. Each run produces one dataset item containing the action result (remember, recall, search, forget, context_pack, update, stats, prune, chunk) and a full OUTPUT record in the key-value store.",
     "type": "object",
     "properties": {
-        "result": {
+        "results": {
             "type": "string",
-            "title": "Action result",
-            "description": "One item in the default dataset containing the action result with fields such as action, ok, memories, results, stats, memoryStoreId, and storeName.",
+            "title": "Action Results",
+            "description": "Dataset item containing the action result. Fields include: action, ok, message, memoryStoreId, storeName, memory (for remember/update), memories[] (for recall/search), totalMemories/byType (for stats), chunks[] (for chunk), and scores[] for ranked search results.",
             "template": "{{links.apiDefaultDatasetUrl}}/items"
         },
         "output": {
             "type": "string",
-            "title": "OUTPUT record",
-            "description": "The OUTPUT record stored in the default key-value store with the full action result.",
+            "title": "Full OUTPUT Record",
+            "description": "Complete action result stored as the OUTPUT key in the default key-value store. Same structure as the dataset item — useful for direct programmatic access.",
             "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/OUTPUT"
         }
     }
